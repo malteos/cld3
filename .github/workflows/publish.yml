@@ -6,6 +6,16 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_target:
+        description: 'Where to publish the built artifacts'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - testpypi
+          - pypi
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -123,7 +133,7 @@ jobs:
           path: dist
 
       - name: Install wheel
-        run: python -m pip install --only-binary=:all: --find-links=dist cld3-py
+        run: "python -m pip install --only-binary=:all: --find-links=dist cld3-py"
 
       - name: Build C++ reference binary (parity_runner)
         run: |
@@ -143,12 +153,15 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Collect all wheels + sdist into a single artifact directory. Runs on every
-  # tag; downstream jobs decide PyPI vs TestPyPI based on the tag shape.
+  # tag push and on manual dispatch when a publish target is selected;
+  # downstream jobs decide PyPI vs TestPyPI.
   # ---------------------------------------------------------------------------
   collect:
     name: collect-dist
     needs: [test, build_wheels, build_sdist, parity_test]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_target != 'none')
     runs-on: ubuntu-latest
     steps:
       - name: Download all wheel artifacts
@@ -174,20 +187,23 @@ jobs:
           path: dist/
 
   # ---------------------------------------------------------------------------
-  # Pre-release tags (v*rc*, v*a*, v*b*, v*dev*) → TestPyPI.
-  # Configured via PyPI Trusted Publisher (OIDC) on the `test.pypi.org` project
+  # Publish to TestPyPI. Triggers:
+  #   - manual workflow_dispatch with publish_target == 'testpypi'
+  #   - pre-release tag push (v*rc*, v*a*, v*b*, v*dev*)
+  # Configured via PyPI Trusted Publisher (OIDC) on the test.pypi.org project
   # with workflow file `publish.yml` and environment `testpypi`.
   # ---------------------------------------------------------------------------
   publish-testpypi:
     name: publish to TestPyPI
     needs: [collect]
     if: |
-      github.event_name == 'push' && (
+      (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'testpypi') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && (
         contains(github.ref, 'rc') ||
         contains(github.ref, 'a')  ||
         contains(github.ref, 'b')  ||
         contains(github.ref, 'dev')
-      )
+      ))
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -206,20 +222,23 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   # ---------------------------------------------------------------------------
-  # Final release tags (v1.2.3) → PyPI.
-  # Configured via PyPI Trusted Publisher (OIDC) on the `pypi.org` project with
+  # Publish to PyPI. Triggers:
+  #   - manual workflow_dispatch with publish_target == 'pypi'
+  #   - final release tag push (v1.2.3, i.e. no rc/a/b/dev marker)
+  # Configured via PyPI Trusted Publisher (OIDC) on the pypi.org project with
   # workflow file `publish.yml` and environment `pypi`.
   # ---------------------------------------------------------------------------
   publish-pypi:
     name: publish to PyPI
     needs: [collect]
     if: |
-      github.event_name == 'push' && !(
+      (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'pypi') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !(
         contains(github.ref, 'rc') ||
         contains(github.ref, 'a')  ||
         contains(github.ref, 'b')  ||
         contains(github.ref, 'dev')
-      )
+      ))
     runs-on: ubuntu-latest
     environment:
       name: pypi
