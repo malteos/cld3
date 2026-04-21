@@ -1,0 +1,104 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.13.6"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cld3-py"
+version = "3.1.0"
+description = "Compact Language Detector v3 (CLD3) Python bindings — modernised fork with prebuilt wheels for Python 3.10–3.14."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Malte Ostendorff" },
+]
+keywords = ["language-detection", "nlp", "cld3", "language-identification"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/malteos/cld3"
+Repository = "https://github.com/malteos/cld3"
+Issues = "https://github.com/malteos/cld3/issues"
+Changelog = "https://github.com/malteos/cld3/blob/master/CHANGELOG.md"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.26"
+cmake.build-type = "Release"
+wheel.packages = ["gcld3"]
+wheel.py-api = ""
+build-dir = "build/{wheel_tag}"
+sdist.include = [
+    "src/**",
+    "gcld3/**",
+    "cmake/**",
+    "misc/**",
+    "tests/**",
+    "CMakeLists.txt",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+sdist.exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.so",
+    "**/*.dylib",
+    "**/*.dll",
+    "src/cld_3/protos/**",
+    "build/**",
+    "wheelhouse/**",
+    "dist/**",
+    ".github/**",
+    ".git/**",
+]
+
+[tool.scikit-build.cmake.define]
+CLD3_FETCH_PROTOBUF = "ON"
+CLD3_BUILD_TOOLS = "OFF"
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-win32 *-manylinux_i686 pp*"
+enable = ["cpython-freethreading"]
+build-verbosity = 1
+test-requires = "pytest"
+test-command = "pytest {package}/gcld3/tests/gcld3_test.py"
+test-skip = "cp314t-*"
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+musllinux-x86_64-image = "musllinux_1_2"
+musllinux-aarch64-image = "musllinux_1_2"
+
+[tool.cibuildwheel.windows]
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+before-build = "pip install delvewheel"
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.15" }
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["gcld3/tests", "tests"]
