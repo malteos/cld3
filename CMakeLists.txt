@@ -109,6 +109,11 @@ target_link_libraries(cld3_core PUBLIC protobuf::libprotobuf-lite)
 
 # Per-compiler flags. Scoped to cld3_core only; don't pollute dependents.
 if(MSVC)
+    # The legacy cld3 sources check a Google-style `COMPILER_MSVC` macro (e.g.
+    # the `registry_` declaration in sentence_features.h is guarded by it to
+    # avoid a duplicate-definition error under MSVC). MSVC itself only defines
+    # `_MSC_VER`, so we supply the expected macro here.
+    target_compile_definitions(cld3_core PRIVATE COMPILER_MSVC)
     target_compile_options(cld3_core PRIVATE
         /wd4267  # size_t -> int narrowing (legacy code)
         /wd4244  # conversion narrowing
