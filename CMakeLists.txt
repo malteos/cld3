@@ -16,6 +16,28 @@ option(CLD3_BUILD_TOOLS    "Build CLI tools: language_identifier_main + parity_r
 option(CLD3_BUILD_PYTHON   "Build the pybind11 Python extension" ON)
 
 # ---------------------------------------------------------------------------
+# Global compiler hygiene — applies to every target, including the protobuf
+# library we fetch. Must be set BEFORE FetchContent_MakeAvailable(protobuf)
+# so protobuf's sources inherit them.
+# ---------------------------------------------------------------------------
+if(MSVC)
+    add_compile_definitions(
+        _CRT_SECURE_NO_WARNINGS
+        _SCL_SECURE_NO_WARNINGS
+        _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
+        _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+    add_compile_options(/bigobj /utf-8)
+    # Select a consistent MSVC runtime across our library and protobuf.
+    if(POLICY CMP0091)
+        cmake_policy(SET CMP0091 NEW)
+    endif()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+endif()
+
+# ---------------------------------------------------------------------------
 # Protobuf
 # ---------------------------------------------------------------------------
 if(CLD3_FETCH_PROTOBUF)
@@ -88,15 +110,11 @@ target_link_libraries(cld3_core PUBLIC protobuf::libprotobuf-lite)
 # Per-compiler flags. Scoped to cld3_core only; don't pollute dependents.
 if(MSVC)
     target_compile_options(cld3_core PRIVATE
-        /bigobj
         /wd4267  # size_t -> int narrowing (legacy code)
         /wd4244  # conversion narrowing
         /wd4996  # deprecated POSIX names
-    )
-    target_compile_definitions(cld3_core PRIVATE
-        _CRT_SECURE_NO_WARNINGS
-        NOMINMAX
-        WIN32_LEAN_AND_MEAN
+        /wd4018  # signed/unsigned mismatch
+        /wd4146  # unary minus on unsigned
     )
 else()
     target_compile_options(cld3_core PRIVATE
