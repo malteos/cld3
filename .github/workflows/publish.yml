@@ -88,10 +88,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # macos-13 runners are deprecated — cross-build Intel Mac wheels on
+        # the arm64 runner instead. cibuildwheel handles the x86_64 toolchain
+        # and runs CIBW_TEST_COMMAND under Rosetta 2.
         include:
           - { os: ubuntu-latest,    arch: x86_64 }
           - { os: ubuntu-24.04-arm, arch: aarch64 }
-          - { os: macos-13,         arch: x86_64 }
+          - { os: macos-14,         arch: x86_64 }
           - { os: macos-14,         arch: arm64  }
           - { os: windows-latest,   arch: AMD64  }
     env:
