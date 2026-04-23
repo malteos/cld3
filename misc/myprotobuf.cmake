@@ -42,12 +42,17 @@ function(MY_PROTOBUF_GENERATE_CPP PATH SRCS HDRS)
 
     execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/${PATH})
 
+    set(_protoc_target_dep "")
+    if(TARGET protobuf::protoc)
+      set(_protoc_target_dep protobuf::protoc)
+    endif()
+
     add_custom_command(
       OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${PATH}/${FIL_WE}.pb.cc"
              "${CMAKE_CURRENT_BINARY_DIR}/${PATH}/${FIL_WE}.pb.h"
       COMMAND  ${PROTOBUF_PROTOC_EXECUTABLE}
       ARGS --cpp_out  ${CMAKE_CURRENT_BINARY_DIR}/${PATH} ${_protobuf_include_path} ${ABS_FIL}
-      DEPENDS ${ABS_FIL}
+      DEPENDS ${ABS_FIL} ${_protoc_target_dep}
       COMMENT "Running C++ protocol buffer compiler on ${FIL}"
       VERBATIM )
   endforeach()

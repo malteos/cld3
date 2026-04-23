@@ -1,13 +1,21 @@
 include LICENSE
 include README.md
-include requirements.txt
-global-include *h
-global-include *cc
-global-include *proto
-prune .github/
-prune .eggs/
+include CHANGELOG.md
+include pyproject.toml
+include CMakeLists.txt
+recursive-include src *.cc *.h *.proto
+recursive-include gcld3 *.cc *.py
+recursive-include cmake *.cmake
+recursive-include misc *.cmake
+recursive-include tests *.py *.cc *.json
 global-exclude *.pyc
-global-exclude *.cache
+global-exclude __pycache__
 global-exclude *.so
-exclude src/cld_3/protos/*h
-exclude src/cld_3/protos/*cc
+global-exclude *.dylib
+global-exclude *.dll
+prune src/cld_3
+prune build
+prune wheelhouse
+prune dist
+prune .github
+prune .git

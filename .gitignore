@@ -1,1 +1,28 @@
-build
+build/
+dist/
+wheelhouse/
+*.egg-info/
+.eggs/
+_skbuild/
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.dll
+
+# Generated protobuf outputs (regenerated at build time)
+src/cld_3/
+
+# Test/CI caches
+.pytest_cache/
+.coverage
+.coverage.*
+.tox/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

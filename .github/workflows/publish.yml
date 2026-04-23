@@ -1,0 +1,262 @@
+name: publish
+
+on:
+  push:
+    branches: [master, main, 'claude/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_target:
+        description: 'Where to publish the built artifacts'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - testpypi
+          - pypi
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast sanity test: build from source on each OS × Python version, run the
+  # in-tree smoke tests. Shakes out source-dist build problems before spending
+  # time on the full wheel matrix.
+  # ---------------------------------------------------------------------------
+  test:
+    # Windows coverage comes from `build_wheels` (cibuildwheel exercises a full
+    # Windows build and runs CIBW_TEST_COMMAND on the produced wheel), so the
+    # fast-feedback source-build matrix skips Windows to avoid doubling
+    # build-from-scratch minutes for little additional signal.
+    name: test-${{ matrix.os }}-py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+
+      - name: Install build + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "scikit-build-core>=0.10" "pybind11>=2.13.6" pytest
+
+      - name: Build + install from source
+        run: python -m pip install -v .
+
+      - name: Smoke tests
+        run: pytest gcld3/tests/gcld3_test.py -v
+
+  # ---------------------------------------------------------------------------
+  # Build a source distribution (tarball).
+  # ---------------------------------------------------------------------------
+  build_sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  # ---------------------------------------------------------------------------
+  # Binary wheels via cibuildwheel, one job per (OS, arch) pair.
+  # ---------------------------------------------------------------------------
+  build_wheels:
+    name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 runners are deprecated — cross-build Intel Mac wheels on
+        # the arm64 runner instead. cibuildwheel handles the x86_64 toolchain
+        # and runs CIBW_TEST_COMMAND under Rosetta 2.
+        include:
+          - { os: ubuntu-latest,    arch: x86_64 }
+          - { os: ubuntu-24.04-arm, arch: aarch64 }
+          - { os: macos-14,         arch: x86_64 }
+          - { os: macos-14,         arch: arm64  }
+          - { os: windows-latest,   arch: AMD64  }
+    env:
+      CIBW_ARCHS: ${{ matrix.arch }}
+      CIBW_BUILD_VERBOSITY: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+
+  # ---------------------------------------------------------------------------
+  # Parity test: builds the C++ reference binary, installs the freshly built
+  # Linux x86_64 wheel, and asserts per-sample prediction equivalence.
+  # ---------------------------------------------------------------------------
+  parity_test:
+    name: parity (C++ vs Python)
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: python -m pip install pytest
+
+      - name: Download Linux x86_64 wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-latest-x86_64
+          path: dist
+
+      - name: Install wheel
+        run: "python -m pip install --only-binary=:all: --find-links=dist cld3-py"
+
+      - name: Build C++ reference binary (parity_runner)
+        run: |
+          cmake -S . -B build \
+            -DCLD3_BUILD_TOOLS=ON \
+            -DCLD3_BUILD_PYTHON=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j --config Release --target parity_runner language_identifier_main
+
+      - name: Run parity tests
+        env:
+          CLD3_PARITY_BINARY: ${{ github.workspace }}/build/parity_runner
+        run: pytest tests/test_parity.py -v
+
+      - name: Quick run of language_identifier_main
+        run: ./build/language_identifier_main
+
+  # ---------------------------------------------------------------------------
+  # Collect all wheels + sdist into a single artifact directory. Runs on every
+  # tag push and on manual dispatch when a publish target is selected;
+  # downstream jobs decide PyPI vs TestPyPI.
+  # ---------------------------------------------------------------------------
+  collect:
+    name: collect-dist
+    needs: [test, build_wheels, build_sdist, parity_test]
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_target != 'none')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: 'wheels-*'
+          merge-multiple: true
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Upload combined dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ---------------------------------------------------------------------------
+  # Publish to TestPyPI. Triggers:
+  #   - manual workflow_dispatch with publish_target == 'testpypi'
+  #   - pre-release tag push (v*rc*, v*a*, v*b*, v*dev*)
+  # Configured via PyPI Trusted Publisher (OIDC) on the test.pypi.org project
+  # with workflow file `publish.yml` and environment `testpypi`.
+  # ---------------------------------------------------------------------------
+  publish-testpypi:
+    name: publish to TestPyPI
+    needs: [collect]
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'testpypi') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && (
+        contains(github.ref, 'rc') ||
+        contains(github.ref, 'a')  ||
+        contains(github.ref, 'b')  ||
+        contains(github.ref, 'dev')
+      ))
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/cld3-py
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  # ---------------------------------------------------------------------------
+  # Publish to PyPI. Triggers:
+  #   - manual workflow_dispatch with publish_target == 'pypi'
+  #   - final release tag push (v1.2.3, i.e. no rc/a/b/dev marker)
+  # Configured via PyPI Trusted Publisher (OIDC) on the pypi.org project with
+  # workflow file `publish.yml` and environment `pypi`.
+  # ---------------------------------------------------------------------------
+  publish-pypi:
+    name: publish to PyPI
+    needs: [collect]
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'pypi') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !(
+        contains(github.ref, 'rc') ||
+        contains(github.ref, 'a')  ||
+        contains(github.ref, 'b')  ||
+        contains(github.ref, 'dev')
+      ))
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cld3-py
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

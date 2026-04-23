@@ -1,8 +1,63 @@
-# Compact Language Detector v3 (CLD3)
+# Compact Language Detector v3 (CLD3) — Python bindings
+
+[![PyPI](https://img.shields.io/pypi/v/cld3-py.svg)](https://pypi.org/project/cld3-py/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/cld3-py.svg)](https://pypi.org/project/cld3-py/)
+
+Modernised Python bindings for Google's CLD3 neural language detector, distributed on PyPI as
+[`cld3-py`](https://pypi.org/project/cld3-py/). Prebuilt wheels are published for:
+
+| Platform                | Architectures                   |
+| ----------------------- | ------------------------------- |
+| Linux (manylinux_2_28)  | `x86_64`, `aarch64`             |
+| Linux (musllinux_1_2)   | `x86_64`, `aarch64`             |
+| macOS                   | `x86_64` (Intel), `arm64` (Apple Silicon) |
+| Windows                 | `AMD64`                         |
+
+Supported Python versions: **3.10, 3.11, 3.12, 3.13, 3.14** (including free-threaded `cp313t` / `cp314t` builds).
+
+## Install
+
+```shell
+pip install cld3-py
+```
+
+## Quick start
+
+The import name is `gcld3`, so code written against the original Google `gcld3` package works unchanged:
+
+```python
+import gcld3
+
+detector = gcld3.NNetLanguageIdentifier(min_num_bytes=0, max_num_bytes=1000)
+
+result = detector.FindLanguage(text="This text is written in English.")
+print(result.language)     # "en"
+print(result.probability)  # ~0.999
+print(result.is_reliable)  # True
+print(result.proportion)   # 1.0
+
+# Multiple languages in the same document:
+sample = "This piece of text is in English. Този текст е на Български."
+for r in detector.FindTopNMostFreqLangs(text=sample, num_langs=2):
+    print(r.language, r.probability, r.proportion)
+```
+
+### Drop-in replacement for `gcld3`
+
+If you are migrating from the old PyPI `gcld3` package:
+
+```shell
+pip uninstall gcld3
+pip install cld3-py
+# No code changes required — `import gcld3` still works.
+```
+
+## Table of contents
 
 * [Model](#model)
 * [Supported Languages](#supported-languages)
-* [Installation](#installation)
+* [Building from source](#building-from-source)
+* [Verification / parity](#verification--parity)
 * [Bugs and Feature Requests](#bugs-and-feature-requests)
 * [Credits](#credits)
 
@@ -144,22 +199,40 @@ zh          | Chinese         | Han (including Simplified and Traditional)
 zh-Latn     | Chinese         | Latin
 zu          | Zulu            | Latin
 
-### Installation
-CLD3 is designed to run in the Chrome browser, so it relies on code in
-[Chromium](http://www.chromium.org/).
-The steps for building and running the demo of the language detection model are:
+### Building from source
 
-- [check out](http://www.chromium.org/developers/how-tos/get-the-code) the
-  Chromium repository.
-- copy the code to `//third_party/cld_3`
-- Uncomment `language_identifier_main` executable in `src/BUILD.gn`.
-- build and run the model using the commands:
+Most users should just `pip install cld3-py`. To build from source (e.g. for an unreleased Python version or
+to work on the bindings):
 
 ```shell
-gn gen out/Default
-ninja -C out/Default third_party/cld_3/src/src:language_identifier_main
-out/Default/language_identifier_main
+git clone https://github.com/malteos/cld3
+cd cld3
+pip install -v .
 ```
+
+The build uses `scikit-build-core` + CMake. Protobuf v3.21.12 is fetched and statically linked via CMake
+`FetchContent`, so no system `protoc` / `libprotobuf` is required.
+
+To additionally build the reference C++ CLI binaries:
+
+```shell
+cmake -S . -B build -DCLD3_BUILD_TOOLS=ON
+cmake --build build -j
+./build/language_identifier_main
+```
+
+### Verification / parity
+
+A parity test (`tests/test_parity.py`) verifies that the Python bindings produce the same predictions as the
+original C++ reference for ~75 multilingual samples. Run it locally with:
+
+```shell
+cmake -S . -B build -DCLD3_BUILD_TOOLS=ON && cmake --build build -j
+CLD3_PARITY_BINARY=$PWD/build/parity_runner pytest tests/test_parity.py -v
+```
+
+The same test runs in CI after every wheel build.
+
 ### Bugs and Feature Requests
 
 Open a [GitHub issue](https://github.com/google/cld3/issues) for this repository to file bugs and feature requests.
